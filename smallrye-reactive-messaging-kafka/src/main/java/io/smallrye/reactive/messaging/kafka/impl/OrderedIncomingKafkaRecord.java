@@ -21,12 +21,12 @@ public class OrderedIncomingKafkaRecord<K, T> extends IncomingKafkaRecord<K, T> 
 
     @Override
     public CompletionStage<Void> ack(Metadata metadata) {
-        return super.ack(metadata).thenRun(postProcessing);
+        return super.ack(metadata).whenComplete((ignored, failure) -> postProcessing.run());
     }
 
     @Override
     public CompletionStage<Void> nack(Throwable reason, Metadata metadata) {
-        return super.nack(reason, metadata).thenRun(postProcessing);
+        return super.nack(reason, metadata).whenComplete((ignored, failure) -> postProcessing.run());
     }
 
 }
