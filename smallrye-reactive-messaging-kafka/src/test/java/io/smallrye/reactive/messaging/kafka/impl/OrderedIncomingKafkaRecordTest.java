@@ -1,6 +1,7 @@
 package io.smallrye.reactive.messaging.kafka.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.concurrent.CompletionException;
@@ -33,6 +34,34 @@ class OrderedIncomingKafkaRecordTest {
     }
 
     @Test
+    void shouldPreserveAckFailureWhenPostProcessingFails() {
+        RuntimeException failure = new RuntimeException("ack failed");
+        RuntimeException postProcessingFailure = new RuntimeException("post-processing failed");
+        OrderedIncomingKafkaRecord<String, String> record = new OrderedIncomingKafkaRecord<>(
+                record(Uni.createFrom().failure(failure), Uni.createFrom().voidItem()),
+                () -> {
+                    throw postProcessingFailure;
+                });
+
+        CompletionException thrown = assertThrows(CompletionException.class,
+                () -> record.ack(Metadata.empty()).toCompletableFuture().join());
+
+        assertThat(thrown.getCause()).isSameAs(failure);
+        assertThat(thrown.getCause().getSuppressed()).isEmpty();
+    }
+
+    @Test
+    void shouldNotFailAckWhenOnlyPostProcessingFails() {
+        OrderedIncomingKafkaRecord<String, String> record = new OrderedIncomingKafkaRecord<>(
+                record(Uni.createFrom().voidItem(), Uni.createFrom().voidItem()),
+                () -> {
+                    throw new RuntimeException("post-processing failed");
+                });
+
+        assertDoesNotThrow(() -> record.ack(Metadata.empty()).toCompletableFuture().join());
+    }
+
+    @Test
     void shouldRunPostProcessingWhenNackFails() {
         RuntimeException failure = new RuntimeException("nack failed");
         AtomicInteger postProcessing = new AtomicInteger();
@@ -46,6 +75,36 @@ class OrderedIncomingKafkaRecordTest {
 
         assertThat(thrown.getCause()).isSameAs(failure);
         assertThat(postProcessing).hasValue(1);
+    }
+
+    @Test
+    void shouldPreserveNackFailureWhenPostProcessingFails() {
+        RuntimeException failure = new RuntimeException("nack failed");
+        RuntimeException postProcessingFailure = new RuntimeException("post-processing failed");
+        OrderedIncomingKafkaRecord<String, String> record = new OrderedIncomingKafkaRecord<>(
+                record(Uni.createFrom().voidItem(), Uni.createFrom().failure(failure)),
+                () -> {
+                    throw postProcessingFailure;
+                });
+
+        CompletionException thrown = assertThrows(CompletionException.class,
+                () -> record.nack(new RuntimeException("processing failed"), Metadata.empty())
+                        .toCompletableFuture().join());
+
+        assertThat(thrown.getCause()).isSameAs(failure);
+        assertThat(thrown.getCause().getSuppressed()).isEmpty();
+    }
+
+    @Test
+    void shouldNotFailNackWhenOnlyPostProcessingFails() {
+        OrderedIncomingKafkaRecord<String, String> record = new OrderedIncomingKafkaRecord<>(
+                record(Uni.createFrom().voidItem(), Uni.createFrom().voidItem()),
+                () -> {
+                    throw new RuntimeException("post-processing failed");
+                });
+
+        assertDoesNotThrow(() -> record.nack(new RuntimeException("processing failed"), Metadata.empty())
+                .toCompletableFuture().join());
     }
 
     private IncomingKafkaRecord<String, String> record(Uni<Void> ackResult, Uni<Void> nackResult) {
